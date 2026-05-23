@@ -4,6 +4,7 @@ import { ImageWithFallback } from "./figma/ImageWithFallback";
 import logo1 from "../../imports/1.png";
 import logo2 from "../../imports/2.png";
 import { useTheme } from "../context/ThemeContext";
+import { businessInfo } from "../businessInfo";
 
 export default function Header() {
   const location = useLocation();
@@ -42,7 +43,7 @@ export default function Header() {
           ))}
 
           <a
-            href="https://facebook.com/jadexcaraccessories"
+            href={businessInfo.facebookLinks.jadex}
             target="_blank"
             rel="noopener noreferrer"
             className="text-gray-900 dark:text-white hover:text-red-600 transition-colors"

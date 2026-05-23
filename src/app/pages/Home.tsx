@@ -1,28 +1,30 @@
 import { useEffect, useState } from "react";
-import { Star } from "lucide-react";
+import { MapPin, Phone, Star } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import dashcamLogo from "../../imports/DashcamPilipines.jpg";
 import marcoLogo from "../../imports/MarcoLED.jpg";
 import dnctLogo from "../../imports/DNCT.jpg";
+import { businessInfo } from "../businessInfo";
+import { projectId, publicAnonKey } from "/utils/supabase/info";
 
 const subsidiaries = [
   {
     name: "Dashcam Pilipinas",
     description: "Premium dashcam solutions",
     logo: dashcamLogo,
-    facebookUrl: "https://facebook.com/dashcampilipinas"
+    facebookUrl: businessInfo.facebookLinks.dashcamPilipinas
   },
   {
     name: "MarcoLED",
     description: "LED lighting systems",
     logo: marcoLogo,
-    facebookUrl: "https://facebook.com/marcoled"
+    facebookUrl: businessInfo.facebookLinks.marcoLed
   },
   {
     name: "Diamond Nano Ceramic Tint",
     description: "Advanced window tinting",
     logo: dnctLogo,
-    facebookUrl: "https://facebook.com/diamondnanotint"
+    facebookUrl: businessInfo.facebookLinks.diamondNanoCeramicTint
   },
 ];
 
@@ -32,59 +34,19 @@ const heroImages = [
   "https://images.unsplash.com/photo-1580273916550-e323be2ae537?w=1920&h=1080&fit=crop",
 ];
 
-const reviews = [
-  {
-    id: 1,
-    name: "Maria Santos",
-    rating: 5,
-    comment: "Excellent service! Got my Diamond Nano Ceramic Tint installed and it looks amazing. The team was professional and the installation was flawless.",
-    date: "2 weeks ago",
-    product: "Diamond Nano Ceramic Tint"
-  },
-  {
-    id: 2,
-    name: "Juan Dela Cruz",
-    rating: 5,
-    comment: "Very happy with my 70Mai dashcam purchase. Great quality and the staff helped me choose the perfect one for my Toyota Vios.",
-    date: "1 month ago",
-    product: "70Mai Pro Plus+ Dashcam"
-  },
-  {
-    id: 3,
-    name: "Carlos Reyes",
-    rating: 5,
-    comment: "Best car accessories shop in town! Got LED headlights for my Honda Civic and they're super bright. Installation was quick and professional.",
-    date: "3 weeks ago",
-    product: "LED Headlight Bulbs"
-  },
-  {
-    id: 4,
-    name: "Anna Garcia",
-    rating: 5,
-    comment: "Love my new tint! Heat rejection is incredible and it looks sleek. Jadex team was very accommodating and answered all my questions.",
-    date: "1 week ago",
-    product: "3M Crystalline Tint"
-  },
-  {
-    id: 5,
-    name: "Miguel Torres",
-    rating: 5,
-    comment: "Highly recommend! Got wipers and LED lights installed. Quality products and fair prices. Will definitely come back for more accessories.",
-    date: "2 months ago",
-    product: "Various Products"
-  },
-  {
-    id: 6,
-    name: "Sofia Ramos",
-    rating: 5,
-    comment: "Professional service from start to finish. The tinting was done perfectly with no bubbles. Very satisfied with the Diamond Nano Ceramic film!",
-    date: "3 weeks ago",
-    product: "Diamond Nano Ceramic Tint"
-  }
-];
+interface Review {
+  id: string;
+  name: string;
+  rating: number;
+  comment: string;
+  date?: string;
+  product?: string;
+}
 
 export default function Home() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const fullAddress = `${businessInfo.address} (${businessInfo.addressNote})`;
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -92,6 +54,33 @@ export default function Home() {
     }, 5000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchReviews = async () => {
+      try {
+        const response = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-a4dcf20c/reviews/featured`,
+          {
+            headers: {
+              Authorization: `Bearer ${publicAnonKey}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setReviews(data.reviews || []);
+      } catch (error) {
+        console.error("Error fetching reviews:", error);
+        setReviews([]);
+      }
+    };
+
+    fetchReviews();
   }, []);
 
   return (
@@ -120,12 +109,12 @@ export default function Home() {
           </h1>
           <div className="space-y-2 text-lg md:text-xl text-gray-200">
             <div className="flex items-center justify-center gap-2">
-              <span className="text-red-600">📍</span>
-              <span>123 Main Street, City, Philippines</span>
+              <MapPin className="w-5 h-5 flex-shrink-0 text-red-600" />
+              <span>{fullAddress}</span>
             </div>
             <div className="flex items-center justify-center gap-2">
-              <span className="text-red-600">📞</span>
-              <span>+63 123 456 7890</span>
+              <Phone className="w-5 h-5 flex-shrink-0 text-red-600" />
+              <span>{businessInfo.phones.join(" / ")}</span>
             </div>
           </div>
         </div>
@@ -175,7 +164,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="bg-white dark:bg-gray-900 py-16 transition-colors">
+      {reviews.length > 0 && (
+        <section className="bg-white dark:bg-gray-900 py-16 transition-colors">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl font-bold text-center mb-4 text-gray-900 dark:text-white">
             What Our Customers Say
@@ -216,7 +206,8 @@ export default function Home() {
             ))}
           </div>
         </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }

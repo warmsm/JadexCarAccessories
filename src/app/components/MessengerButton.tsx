@@ -1,9 +1,10 @@
 import { MessageCircle } from "lucide-react";
+import { businessInfo } from "../businessInfo";
 
 export default function MessengerButton() {
   return (
     <a
-      href="https://m.me/jadexcaraccessories"
+      href={businessInfo.messengerUrl}
       target="_blank"
       rel="noopener noreferrer"
       className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white p-4 rounded-full shadow-lg transition-all hover:scale-110 z-50"

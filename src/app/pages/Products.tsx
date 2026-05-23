@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Filter } from "lucide-react";
+import { Filter, X } from "lucide-react";
 import { projectId, publicAnonKey } from "/utils/supabase/info";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 
@@ -18,7 +18,18 @@ interface Product {
 }
 
 const productTypes = ["All", "Dashcam", "LED Lights", "Wipers", "Tints", "Accessories"];
-const carBrands = ["All", "Universal", "Toyota", "Honda", "Mitsubishi", "Nissan", "Ford", "Hyundai"];
+const carBrands = ["All", "Toyota", "Honda", "Mitsubishi", "Nissan", "Ford", "Hyundai"];
+const allCarBrands = ["All Car Brands", "Universal"];
+
+const fitsAllCars = (product: Product) => allCarBrands.includes(product.brand);
+
+const getFitLabel = (product: Product) => {
+  if (fitsAllCars(product)) {
+    return "All car brands, models, and years";
+  }
+
+  return `${product.brand} ${product.model} ${product.year}`;
+};
 
 export default function Products() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -27,6 +38,7 @@ export default function Products() {
   const [selectedBrand, setSelectedBrand] = useState("All");
   const [selectedModel, setSelectedModel] = useState("All");
   const [selectedYear, setSelectedYear] = useState("All");
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     fetchProducts();
@@ -60,19 +72,19 @@ export default function Products() {
     }
   };
 
-  const availableModels = selectedBrand === "All" || selectedBrand === "Universal"
+  const availableModels = selectedBrand === "All"
     ? ["All"]
     : ["All", ...new Set(products.filter(p => p.brand === selectedBrand).map(p => p.model))];
 
-  const availableYears = selectedModel === "All" || selectedBrand === "Universal"
+  const availableYears = selectedModel === "All"
     ? ["All"]
     : ["All", ...new Set(products.filter(p => p.model === selectedModel).map(p => p.year))];
 
   const filteredProducts = products.filter((product) => {
     if (selectedType !== "All" && product.type !== selectedType) return false;
-    if (selectedBrand !== "All" && product.brand !== selectedBrand) return false;
-    if (selectedModel !== "All" && product.brand !== "Universal" && product.model !== selectedModel) return false;
-    if (selectedYear !== "All" && product.brand !== "Universal" && product.year !== selectedYear) return false;
+    if (selectedBrand !== "All" && !fitsAllCars(product) && product.brand !== selectedBrand) return false;
+    if (selectedModel !== "All" && !fitsAllCars(product) && product.model !== selectedModel) return false;
+    if (selectedYear !== "All" && !fitsAllCars(product) && product.year !== selectedYear) return false;
     return true;
   });
 
@@ -144,7 +156,7 @@ export default function Products() {
                   setSelectedModel(e.target.value);
                   setSelectedYear("All");
                 }}
-                disabled={selectedBrand === "All" || selectedBrand === "Universal"}
+                disabled={selectedBrand === "All"}
                 className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded px-3 py-2 focus:outline-none focus:border-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {availableModels.map((model) => (
@@ -162,7 +174,7 @@ export default function Products() {
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                disabled={selectedModel === "All" || selectedBrand === "Universal"}
+                disabled={selectedModel === "All"}
                 className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded px-3 py-2 focus:outline-none focus:border-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {availableYears.map((year) => (
@@ -177,26 +189,33 @@ export default function Products() {
 
         {filteredProducts.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-600 dark:text-gray-400 text-lg">No products found matching your filters.</p>
-            <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">Try adjusting your filter criteria.</p>
+            <p className="text-gray-600 dark:text-gray-400 text-lg">No products are listed yet.</p>
+            <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">New products will appear here once the admin adds real inventory.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProducts.map((product) => (
-              <div
+              <button
                 key={product.id}
-                className={`bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg overflow-hidden transition-all ${
+                onClick={() => setSelectedProduct(product)}
+                className={`text-left bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg overflow-hidden transition-all ${
                   product.stock === 0
-                    ? "opacity-50 cursor-not-allowed"
+                    ? "opacity-60"
                     : "hover:border-red-600"
                 }`}
               >
-                <div className="relative h-48 bg-gray-200 dark:bg-gray-800">
-                  <ImageWithFallback
-                    src={product.image || "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=400&h=300&fit=crop"}
-                    alt={product.name}
-                    className="w-full h-full object-cover"
-                  />
+                <div className="relative aspect-[4/3] bg-gray-200 dark:bg-gray-800">
+                  {product.image ? (
+                    <ImageWithFallback
+                      src={product.image}
+                      alt={product.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                      No product image
+                    </div>
+                  )}
                   {product.stock === 0 && (
                     <div className="absolute inset-0 bg-black/75 flex items-center justify-center">
                       <span className="text-white font-bold text-lg">OUT OF STOCK</span>
@@ -205,34 +224,60 @@ export default function Products() {
                 </div>
 
                 <div className="p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">{product.name}</h3>
-                    <span className="text-red-600 font-bold text-lg">₱{product.price}</span>
-                  </div>
-
-                  <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400 mb-3">
-                    <p><span className="text-gray-500 dark:text-gray-500">Type:</span> {product.type}</p>
-                    <p>
-                      <span className="text-gray-500 dark:text-gray-500">For:</span>{" "}
-                      {product.brand === "Universal"
-                        ? "All Car Models"
-                        : `${product.brand} ${product.model} ${product.year}`}
-                    </p>
-                    {product.varieties && (
-                      <p><span className="text-gray-500 dark:text-gray-500">Varieties:</span> {product.varieties}</p>
-                    )}
-                    <p><span className="text-gray-500 dark:text-gray-500">Stock:</span> {product.stock} available</p>
-                  </div>
-
-                  {product.description && (
-                    <p className="text-sm text-gray-500 dark:text-gray-500 line-clamp-2">{product.description}</p>
-                  )}
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">{product.name}</h3>
+                  <span className="text-red-600 font-bold text-lg">PHP {product.price}</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
+
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-black text-gray-900 dark:text-white w-full max-w-4xl rounded-lg overflow-hidden">
+            <div className="flex justify-end p-3">
+              <button
+                onClick={() => setSelectedProduct(null)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-900 rounded"
+                aria-label="Close product details"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6 pt-0">
+              <div className="aspect-[4/3] bg-gray-200 dark:bg-gray-800 rounded overflow-hidden">
+                {selectedProduct.image ? (
+                  <ImageWithFallback
+                    src={selectedProduct.image}
+                    alt={selectedProduct.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-500 dark:text-gray-400">
+                    No product image
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-sm text-red-600 font-semibold mb-2">{selectedProduct.type}</p>
+                <h2 className="text-3xl font-bold mb-3">{selectedProduct.name}</h2>
+                <p className="text-2xl font-bold text-red-600 mb-5">PHP {selectedProduct.price}</p>
+                <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-5">
+                  <p><span className="text-gray-500">For:</span> {getFitLabel(selectedProduct)}</p>
+                  {selectedProduct.varieties && (
+                    <p><span className="text-gray-500">Varieties:</span> {selectedProduct.varieties}</p>
+                  )}
+                  <p><span className="text-gray-500">Stock:</span> {selectedProduct.stock} available</p>
+                </div>
+                {selectedProduct.description && (
+                  <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{selectedProduct.description}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

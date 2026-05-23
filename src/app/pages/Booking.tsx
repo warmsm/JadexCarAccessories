@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { format, addDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek } from "date-fns";
+import { format, addDays, addMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek } from "date-fns";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Upload, CheckCircle } from "lucide-react";
 import { projectId, publicAnonKey } from "/utils/supabase/info";
 
@@ -19,6 +19,11 @@ interface Booking {
   customerFacebook: string;
 }
 
+interface ClosedDate {
+  date: string;
+  reason?: string;
+}
+
 const TIME_SLOTS: TimeSlot[] = [
   { time: "09:00 AM", totalSlots: 3, bookedSlots: 0 },
   { time: "11:00 AM", totalSlots: 3, bookedSlots: 0 },
@@ -30,6 +35,7 @@ export default function Booking() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
@@ -44,6 +50,7 @@ export default function Booking() {
 
   useEffect(() => {
     fetchBookings();
+    fetchClosedDates();
   }, []);
 
   const fetchBookings = async () => {
@@ -72,6 +79,29 @@ export default function Booking() {
     }
   };
 
+  const fetchClosedDates = async () => {
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-a4dcf20c/closed-dates`,
+        {
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setClosedDates(data.closedDates || []);
+    } catch (error) {
+      console.error("Error fetching closed dates:", error);
+      setClosedDates([]);
+    }
+  };
+
   const getTimeSlotsForDate = (date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
     const dateBookings = bookings.filter(
@@ -91,6 +121,11 @@ export default function Booking() {
   const isDateFullyBooked = (date: Date) => {
     const slots = getTimeSlotsForDate(date);
     return slots.every((slot) => slot.available === 0);
+  };
+
+  const isShopClosed = (date: Date) => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    return closedDates.some((closedDate) => closedDate.date === dateStr);
   };
 
   const handleSubmitBooking = async () => {
@@ -166,6 +201,8 @@ export default function Booking() {
   const calendarStart = startOfWeek(monthStart);
   const calendarEnd = endOfWeek(monthEnd);
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  const today = new Date(new Date().setHours(0, 0, 0, 0));
+  const maxBookingDate = addMonths(today, 2);
 
   const timeSlots = selectedDate ? getTimeSlotsForDate(selectedDate) : [];
 
@@ -223,27 +260,33 @@ export default function Booking() {
                 const isCurrentMonth = isSameMonth(day, currentMonth);
                 const isSelected = selectedDate && isSameDay(day, selectedDate);
                 const isFullyBooked = isDateFullyBooked(day);
-                const isPast = day < new Date(new Date().setHours(0, 0, 0, 0));
+                const isPast = day < today;
+                const isBeyondBookingWindow = day > maxBookingDate;
+                const isClosed = isShopClosed(day);
+                const isDisabled = !isCurrentMonth || isFullyBooked || isPast || isBeyondBookingWindow || isClosed;
 
                 return (
                   <button
                     key={day.toString()}
                     onClick={() => {
-                      if (isCurrentMonth && !isFullyBooked && !isPast) {
+                      if (!isDisabled) {
                         setSelectedDate(day);
                         setShowBookingForm(false);
                         setSelectedTimeSlot(null);
                       }
                     }}
-                    disabled={!isCurrentMonth || isFullyBooked || isPast}
+                    disabled={isDisabled}
                     className={`
                       aspect-square rounded-lg text-sm transition-all
                       ${!isCurrentMonth ? "text-gray-400 dark:text-gray-700 cursor-default" : ""}
                       ${isPast && isCurrentMonth ? "text-gray-500 dark:text-gray-600 cursor-not-allowed" : ""}
+                      ${isBeyondBookingWindow && isCurrentMonth ? "text-gray-500 dark:text-gray-600 cursor-not-allowed" : ""}
+                      ${isClosed && isCurrentMonth ? "bg-red-100 dark:bg-red-950/40 text-red-500 cursor-not-allowed" : ""}
                       ${isFullyBooked && isCurrentMonth && !isPast ? "bg-gray-300 dark:bg-gray-800 text-gray-500 dark:text-gray-600 cursor-not-allowed" : ""}
-                      ${isCurrentMonth && !isFullyBooked && !isPast ? "text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-800 cursor-pointer" : ""}
+                      ${isCurrentMonth && !isFullyBooked && !isPast && !isBeyondBookingWindow && !isClosed ? "text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-800 cursor-pointer" : ""}
                       ${isSelected ? "bg-red-600 text-white font-bold" : ""}
                     `}
+                    title={isClosed ? "Shop closed" : undefined}
                   >
                     {format(day, "d")}
                   </button>
@@ -259,6 +302,10 @@ export default function Booking() {
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-red-600 rounded"></div>
                 <span>Selected</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-red-100 dark:bg-red-950/40 rounded"></div>
+                <span>Closed</span>
               </div>
             </div>
           </div>
@@ -298,7 +345,7 @@ export default function Booking() {
                       value={formData.customerPhone}
                       onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
                       className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded px-3 py-2 focus:outline-none focus:border-red-600"
-                      placeholder="+63 123 456 7890"
+                      placeholder="0917 123 4567"
                     />
                   </div>
 
