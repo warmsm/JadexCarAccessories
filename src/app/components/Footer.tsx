@@ -3,6 +3,7 @@ import { businessInfo } from "../businessInfo";
 
 export default function Footer() {
   const fullAddress = `${businessInfo.address} (${businessInfo.addressNote})`;
+  const mapEmbedUrl = `https://www.google.com/maps?q=${encodeURIComponent(fullAddress)}&output=embed`;
 
   return (
     <footer className="bg-gray-100 dark:bg-black text-gray-900 dark:text-white border-t border-gray-300 dark:border-gray-800 mt-auto transition-colors">
@@ -60,6 +61,30 @@ export default function Footer() {
                 </a>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="mt-8 pt-6 border-t border-gray-300 dark:border-gray-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <h4 className="text-sm font-semibold">Find Us</h4>
+            <a
+              href={businessInfo.googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-red-600 hover:text-red-500 transition-colors"
+            >
+              <MapPin className="w-4 h-4" />
+              Open in Google Maps
+            </a>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-gray-300 dark:border-gray-800 bg-gray-200 dark:bg-gray-900">
+            <iframe
+              title="Jadex Car Accessories location map"
+              src={mapEmbedUrl}
+              className="h-72 w-full"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
           </div>
         </div>
 

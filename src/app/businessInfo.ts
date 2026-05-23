@@ -9,5 +9,6 @@ export const businessInfo = {
     dashcamPilipinas: "https://www.facebook.com/dashcampilipinass",
     diamondNanoCeramicTint: "https://www.facebook.com/DiamondNanoCeramicTintCavite",
   },
+  googleMapsUrl: "https://maps.app.goo.gl/DY9d4jQgCBG3RvvEA?g_st=ic",
   messengerUrl: "https://m.me/JadexCarAccessoriesOfficial",
 };
