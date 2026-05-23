@@ -77,13 +77,20 @@ export default function Footer() {
               Open in Google Maps
             </a>
           </div>
-          <div className="overflow-hidden rounded-lg border border-gray-300 dark:border-gray-800 bg-gray-200 dark:bg-gray-900">
+          <div className="relative overflow-hidden rounded-lg border border-gray-300 dark:border-gray-800 bg-gray-200 dark:bg-gray-900">
             <iframe
               title="Jadex Car Accessories location map"
               src={mapEmbedUrl}
               className="h-72 w-full"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
+            />
+            <a
+              href={businessInfo.googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute inset-0"
+              aria-label="Open Jadex Car Accessories in Google Maps"
             />
           </div>
         </div>
