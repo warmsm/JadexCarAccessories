@@ -9,8 +9,8 @@ const ADMIN_ACCOUNT_PREFIX = "adminAccount:";
 const ADMIN_SESSION_PREFIX = "adminSession:";
 
 const defaultAdminAccounts = [
-  { username: "cashteoxon", password: "tatiisabel" },
-  { username: "kenmorillo", password: "kadeaustin" },
+  { username: "cashteoxon", password: "tatiisabel", role: "executive" },
+  { username: "kenmorillo", password: "kadeaustin", role: "executive" },
 ];
 
 // Create Supabase client for storage
@@ -66,8 +66,11 @@ const ensureDefaultAdminAccounts = async () => {
         id,
         username: account.username,
         passwordHash: await hashPassword(account.password),
+        role: account.role,
         createdAt: new Date().toISOString(),
       });
+    } else if (existing.role !== account.role) {
+      await kv.set(id, { ...existing, role: account.role, updatedAt: new Date().toISOString() });
     }
   }
 };
@@ -84,6 +87,15 @@ const requireAdmin = async (c: any) => {
   }
 
   return session;
+};
+
+const requireExecutive = async (c: any) => {
+  const admin = await requireAdmin(c);
+  if (!admin || admin.role !== "executive") {
+    return null;
+  }
+
+  return admin;
 };
 
 // Admin auth routes
@@ -106,10 +118,11 @@ app.post("/make-server-a4dcf20c/admin/login", async (c) => {
     await kv.set(`${ADMIN_SESSION_PREFIX}${token}`, {
       token,
       username,
+      role: account.role || "employee",
       createdAt: new Date().toISOString(),
     });
 
-    return c.json({ success: true, token, username });
+    return c.json({ success: true, token, username, role: account.role || "employee" });
   } catch (error) {
     console.log(`Error logging admin in: ${error}`);
     return c.json({ error: "Failed to log in" }, 500);
@@ -118,7 +131,7 @@ app.post("/make-server-a4dcf20c/admin/login", async (c) => {
 
 app.post("/make-server-a4dcf20c/admin/accounts", async (c) => {
   try {
-    const admin = await requireAdmin(c);
+    const admin = await requireExecutive(c);
     if (!admin) {
       return c.json({ error: "Unauthorized" }, 401);
     }
@@ -143,6 +156,7 @@ app.post("/make-server-a4dcf20c/admin/accounts", async (c) => {
       id,
       username: normalizedUsername,
       passwordHash: await hashPassword(String(password)),
+      role: "employee",
       createdBy: admin.username,
       createdAt: new Date().toISOString(),
     });
@@ -151,6 +165,72 @@ app.post("/make-server-a4dcf20c/admin/accounts", async (c) => {
   } catch (error) {
     console.log(`Error creating admin account: ${error}`);
     return c.json({ error: "Failed to create admin account" }, 500);
+  }
+});
+
+app.get("/make-server-a4dcf20c/admin/accounts", async (c) => {
+  try {
+    if (!(await requireExecutive(c))) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    await ensureDefaultAdminAccounts();
+    const accounts = await kv.getByPrefix(ADMIN_ACCOUNT_PREFIX);
+    return c.json({
+      accounts: (accounts || []).map((account) => ({
+        id: account.id,
+        username: account.username,
+        role: account.role || "employee",
+        createdAt: account.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.log(`Error fetching admin accounts: ${error}`);
+    return c.json({ error: "Failed to fetch admin accounts" }, 500);
+  }
+});
+
+app.put("/make-server-a4dcf20c/admin/accounts/:username", async (c) => {
+  try {
+    const admin = await requireExecutive(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const username = c.req.param("username");
+    const updates = await c.req.json();
+    const id = `${ADMIN_ACCOUNT_PREFIX}${username}`;
+    const existing = await kv.get(id);
+    if (!existing) {
+      return c.json({ error: "Account not found" }, 404);
+    }
+
+    const role = updates.role === "executive" ? "executive" : "employee";
+    await kv.set(id, { ...existing, role, updatedBy: admin.username, updatedAt: new Date().toISOString() });
+    return c.json({ success: true });
+  } catch (error) {
+    console.log(`Error updating admin account ${c.req.param("username")}: ${error}`);
+    return c.json({ error: "Failed to update admin account" }, 500);
+  }
+});
+
+app.delete("/make-server-a4dcf20c/admin/accounts/:username", async (c) => {
+  try {
+    const admin = await requireExecutive(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const username = c.req.param("username");
+    if (username === admin.username) {
+      return c.json({ error: "You cannot delete your own account" }, 400);
+    }
+
+    await kv.del(`${ADMIN_ACCOUNT_PREFIX}${username}`);
+    return c.json({ success: true });
+  } catch (error) {
+    console.log(`Error deleting admin account ${c.req.param("username")}: ${error}`);
+    return c.json({ error: "Failed to delete admin account" }, 500);
   }
 });
 
@@ -167,7 +247,7 @@ app.get("/make-server-a4dcf20c/products", async (c) => {
 
 app.post("/make-server-a4dcf20c/products", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -183,7 +263,7 @@ app.post("/make-server-a4dcf20c/products", async (c) => {
 
 app.put("/make-server-a4dcf20c/products/:id", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -201,9 +281,31 @@ app.put("/make-server-a4dcf20c/products/:id", async (c) => {
   }
 });
 
+app.put("/make-server-a4dcf20c/products/:id/decrement-stock", async (c) => {
+  try {
+    const admin = await requireAdmin(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const id = c.req.param("id");
+    const existing = await kv.get(id);
+    if (!existing) {
+      return c.json({ error: "Product not found" }, 404);
+    }
+
+    const stock = Math.max(0, Number(existing.stock || 0) - 1);
+    await kv.set(id, { ...existing, stock, updatedBy: admin.username, updatedAt: new Date().toISOString() });
+    return c.json({ success: true, stock });
+  } catch (error) {
+    console.log(`Error decrementing product stock ${c.req.param("id")}: ${error}`);
+    return c.json({ error: "Failed to decrement stock" }, 500);
+  }
+});
+
 app.delete("/make-server-a4dcf20c/products/:id", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -222,7 +324,7 @@ app.delete("/make-server-a4dcf20c/products/:id", async (c) => {
 
 app.delete("/make-server-a4dcf20c/products", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -294,7 +396,7 @@ app.get("/make-server-a4dcf20c/closed-dates", async (c) => {
 
 app.post("/make-server-a4dcf20c/closed-dates", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -319,7 +421,7 @@ app.post("/make-server-a4dcf20c/closed-dates", async (c) => {
 
 app.delete("/make-server-a4dcf20c/closed-dates/:date", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -333,7 +435,7 @@ app.delete("/make-server-a4dcf20c/closed-dates/:date", async (c) => {
 
 app.put("/make-server-a4dcf20c/bookings/:id/verify", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -397,7 +499,7 @@ app.post("/make-server-a4dcf20c/upload-payment", async (c) => {
 // Get signed URL for payment proof
 app.get("/make-server-a4dcf20c/payment-proof/:fileName", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -420,7 +522,7 @@ app.get("/make-server-a4dcf20c/payment-proof/:fileName", async (c) => {
 // Reviews routes
 app.get("/make-server-a4dcf20c/reviews", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -447,7 +549,7 @@ app.get("/make-server-a4dcf20c/reviews/featured", async (c) => {
 
 app.post("/make-server-a4dcf20c/reviews", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -468,7 +570,7 @@ app.post("/make-server-a4dcf20c/reviews", async (c) => {
 
 app.put("/make-server-a4dcf20c/reviews/:id", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
@@ -488,7 +590,7 @@ app.put("/make-server-a4dcf20c/reviews/:id", async (c) => {
 
 app.delete("/make-server-a4dcf20c/reviews/:id", async (c) => {
   try {
-    if (!(await requireAdmin(c))) {
+    if (!(await requireExecutive(c))) {
       return c.json({ error: "Unauthorized" }, 401);
     }
 

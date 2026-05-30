@@ -6,10 +6,12 @@ import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 interface Product {
   id: string;
   name: string;
-  type: string;
-  brand: string;
-  model: string;
-  year: string;
+  type?: string;
+  types?: string[];
+  brand?: string;
+  model?: string;
+  year?: string;
+  fitments?: { brand: string; model: string; year: string }[];
   price: number;
   stock: number;
   varieties: string;
@@ -17,18 +19,25 @@ interface Product {
   description: string;
 }
 
-const productTypes = ["All", "Dashcam", "LED Lights", "Wipers", "Tints", "Accessories"];
-const carBrands = ["All", "Toyota", "Honda", "Mitsubishi", "Nissan", "Ford", "Hyundai"];
 const allCarBrands = ["All Car Brands", "Universal"];
 
-const fitsAllCars = (product: Product) => allCarBrands.includes(product.brand);
+const getTypes = (product: Product) => product.types?.length ? product.types : product.type ? [product.type] : [];
+const getFitments = (product: Product) => product.fitments?.length
+  ? product.fitments
+  : [{ brand: product.brand || "", model: product.model || "", year: product.year || "" }];
+
+const isUniversalFitment = (fitment: { brand?: string }) => allCarBrands.some((label) => label.toLowerCase() === String(fitment.brand || "").toLowerCase());
+const fitsAllCars = (product: Product) => getFitments(product).some(isUniversalFitment);
 
 const getFitLabel = (product: Product) => {
   if (fitsAllCars(product)) {
     return "All car brands, models, and years";
   }
 
-  return `${product.brand} ${product.model} ${product.year}`;
+  return getFitments(product)
+    .map((fitment) => [fitment.brand, fitment.model, fitment.year].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("; ");
 };
 
 export default function Products() {
@@ -74,17 +83,35 @@ export default function Products() {
 
   const availableModels = selectedBrand === "All"
     ? ["All"]
-    : ["All", ...new Set(products.filter(p => p.brand === selectedBrand).map(p => p.model))];
+    : ["All", ...new Set(products.flatMap((product) => getFitments(product).filter((fitment) => fitment.brand === selectedBrand).map((fitment) => fitment.model)).filter(Boolean))];
 
   const availableYears = selectedModel === "All"
     ? ["All"]
-    : ["All", ...new Set(products.filter(p => p.model === selectedModel).map(p => p.year))];
+    : ["All", ...new Set(products.flatMap((product) => getFitments(product).filter((fitment) => fitment.model === selectedModel).map((fitment) => fitment.year)).filter(Boolean))];
+
+  const productTypes = ["All", ...new Set(products.flatMap(getTypes).filter(Boolean))];
+  const carBrands = [
+    "All",
+    ...new Set(
+      products
+        .flatMap(getFitments)
+        .map((fitment) => fitment.brand)
+        .filter((brand) => brand && !allCarBrands.some((label) => label.toLowerCase() === brand.toLowerCase()))
+    ),
+  ];
 
   const filteredProducts = products.filter((product) => {
-    if (selectedType !== "All" && product.type !== selectedType) return false;
-    if (selectedBrand !== "All" && !fitsAllCars(product) && product.brand !== selectedBrand) return false;
-    if (selectedModel !== "All" && !fitsAllCars(product) && product.model !== selectedModel) return false;
-    if (selectedYear !== "All" && !fitsAllCars(product) && product.year !== selectedYear) return false;
+    const fitments = getFitments(product);
+    const productFitsSelection = fitments.some((fitment) => {
+      if (isUniversalFitment(fitment)) return true;
+      if (selectedBrand !== "All" && fitment.brand !== selectedBrand) return false;
+      if (selectedModel !== "All" && fitment.model !== selectedModel) return false;
+      if (selectedYear !== "All" && fitment.year !== selectedYear) return false;
+      return true;
+    });
+
+    if (selectedType !== "All" && !getTypes(product).includes(selectedType)) return false;
+    if (!productFitsSelection) return false;
     return true;
   });
 
@@ -260,7 +287,7 @@ export default function Products() {
                 )}
               </div>
               <div>
-                <p className="text-sm text-red-600 font-semibold mb-2">{selectedProduct.type}</p>
+                <p className="text-sm text-red-600 font-semibold mb-2">{getTypes(selectedProduct).join(", ")}</p>
                 <h2 className="text-3xl font-bold mb-3">{selectedProduct.name}</h2>
                 <p className="text-2xl font-bold text-red-600 mb-5">PHP {selectedProduct.price}</p>
                 <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-5">
