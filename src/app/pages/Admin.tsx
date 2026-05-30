@@ -30,6 +30,7 @@ interface Product {
   price: number;
   stock: number;
   varieties: string;
+  varietyStocks?: { name: string; stock: number }[];
   image: string;
   description: string;
 }
@@ -68,19 +69,30 @@ interface Account {
   createdAt?: string;
 }
 
+interface PasswordRequest {
+  id: string;
+  username: string;
+  status: "pending" | "approved" | "completed";
+  otp?: string;
+  requestedBy: string;
+  approvedBy?: string;
+}
+
 type Role = "executive" | "employee";
 type Tab = "products" | "stock" | "bookings" | "closedDates" | "reviews" | "accounts";
 
 const apiBase = `https://${projectId}.supabase.co/functions/v1/make-server-a4dcf20c`;
 const headers = { Authorization: `Bearer ${publicAnonKey}` };
 const emptyFitment = { brand: "", model: "", year: "" };
+const emptyVariety = { name: "", stock: 0 };
 const emptyProduct = {
   name: "",
-  types: [""],
+  type: "",
   fitments: [{ ...emptyFitment }],
   price: 0,
   stock: 0,
   varieties: "",
+  varietyStocks: [{ ...emptyVariety }],
   image: "",
   description: "",
 };
@@ -98,12 +110,14 @@ export default function Admin() {
   const [closedDates, setClosedDates] = useState<ClosedDate[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [passwordRequests, setPasswordRequests] = useState<PasswordRequest[]>([]);
   const [newProduct, setNewProduct] = useState(emptyProduct);
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [newClosedDate, setNewClosedDate] = useState({ date: "", reason: "" });
+  const [newClosedDate, setNewClosedDate] = useState({ startDate: "", endDate: "", reason: "" });
   const [newReview, setNewReview] = useState(emptyReview);
   const [showAddReview, setShowAddReview] = useState(false);
   const [newAccount, setNewAccount] = useState({ username: "", password: "" });
+  const [passwordCompletion, setPasswordCompletion] = useState<Record<string, { otp: string; newPassword: string }>>({});
 
   const isExecutive = adminRole === "executive";
 
@@ -115,9 +129,20 @@ export default function Admin() {
       fetchClosedDates();
       fetchReviews();
       fetchAccounts();
+      fetchPasswordRequests();
     } else {
       setActiveTab("stock");
     }
+  }, [adminToken, adminRole]);
+
+  useEffect(() => {
+    if (!adminToken || !isExecutive) return;
+
+    const interval = window.setInterval(() => {
+      fetchPasswordRequests();
+    }, 10000);
+
+    return () => window.clearInterval(interval);
   }, [adminToken, adminRole]);
 
   const requestJson = async (path: string, options: RequestInit = {}) => {
@@ -181,9 +206,15 @@ export default function Admin() {
   const fetchClosedDates = async () => setClosedDates((await requestJson("/closed-dates")).closedDates || []);
   const fetchReviews = async () => setReviews((await requestJson("/reviews")).reviews || []);
   const fetchAccounts = async () => setAccounts((await requestJson("/admin/accounts")).accounts || []);
+  const fetchPasswordRequests = async () => setPasswordRequests((await requestJson("/admin/password-requests")).requests || []);
 
   const cleanProduct = () => {
-    const types = newProduct.types.map((type) => type.trim()).filter(Boolean);
+    const varietyStocks = newProduct.varietyStocks
+      .map((variety) => ({ name: variety.name.trim(), stock: Number(variety.stock || 0) }))
+      .filter((variety) => variety.name);
+    const stock = varietyStocks.length
+      ? varietyStocks.reduce((total, variety) => total + Number(variety.stock || 0), 0)
+      : Number(newProduct.stock || 0);
     const fitments = newProduct.fitments
       .map((fitment) => ({
         brand: fitment.brand.trim(),
@@ -193,12 +224,15 @@ export default function Admin() {
       .filter((fitment) => fitment.brand || fitment.model || fitment.year);
     return {
       ...newProduct,
-      type: types[0] || "",
-      types,
+      type: newProduct.type.trim(),
+      types: newProduct.type.trim() ? [newProduct.type.trim()] : [],
       brand: fitments[0]?.brand || "",
       model: fitments[0]?.model || "",
       year: fitments[0]?.year || "",
       fitments,
+      varietyStocks,
+      varieties: varietyStocks.map((variety) => variety.name).join(", "),
+      stock,
     };
   };
 
@@ -219,8 +253,11 @@ export default function Admin() {
     fetchProducts();
   };
 
-  const handleSubtractStock = async (productId: string) => {
-    await requestJson(`/products/${productId}/decrement-stock`, { method: "PUT" });
+  const handleSubtractStock = async (productId: string, varietyIndex?: number) => {
+    await requestJson(`/products/${productId}/decrement-stock`, {
+      method: "PUT",
+      body: JSON.stringify(typeof varietyIndex === "number" ? { varietyIndex } : {}),
+    });
     fetchProducts();
   };
 
@@ -241,9 +278,9 @@ export default function Admin() {
   };
 
   const handleAddClosedDate = async () => {
-    if (!newClosedDate.date) return alert("Please choose a date");
+    if (!newClosedDate.startDate) return alert("Please choose a start date");
     await requestJson("/closed-dates", { method: "POST", body: JSON.stringify(newClosedDate) });
-    setNewClosedDate({ date: "", reason: "" });
+    setNewClosedDate({ startDate: "", endDate: "", reason: "" });
     fetchClosedDates();
   };
 
@@ -279,6 +316,26 @@ export default function Admin() {
     if (!confirm(`Delete ${username}?`)) return;
     await requestJson(`/admin/accounts/${username}`, { method: "DELETE" });
     fetchAccounts();
+  };
+
+  const handleRequestPasswordChange = async (username: string) => {
+    await requestJson("/admin/password-requests", { method: "POST", body: JSON.stringify({ username }) });
+    fetchPasswordRequests();
+  };
+
+  const handleApprovePasswordRequest = async (requestId: string) => {
+    await requestJson(`/admin/password-requests/${encodeURIComponent(requestId)}/approve`, { method: "PUT" });
+    fetchPasswordRequests();
+  };
+
+  const handleCompletePasswordRequest = async (requestId: string) => {
+    const completion = passwordCompletion[requestId];
+    await requestJson(`/admin/password-requests/${encodeURIComponent(requestId)}/complete`, {
+      method: "PUT",
+      body: JSON.stringify(completion),
+    });
+    setPasswordCompletion({ ...passwordCompletion, [requestId]: { otp: "", newPassword: "" } });
+    fetchPasswordRequests();
   };
 
   const tabs = isExecutive
@@ -362,9 +419,8 @@ export default function Admin() {
               <div className="bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg p-6 mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <TextInput label="Product Name" value={newProduct.name} onChange={(name) => setNewProduct({ ...newProduct, name })} />
+                  <TextInput label="Product Type" value={newProduct.type} onChange={(type) => setNewProduct({ ...newProduct, type })} />
                   <NumberInput label="Price" value={newProduct.price} onChange={(price) => setNewProduct({ ...newProduct, price })} />
-                  <NumberInput label="Initial Stock" value={newProduct.stock} onChange={(stock) => setNewProduct({ ...newProduct, stock })} />
-                  <TextInput label="Varieties" value={newProduct.varieties} onChange={(varieties) => setNewProduct({ ...newProduct, varieties })} />
                   <div className="md:col-span-2">
                     <TextInput label="Image URL" value={newProduct.image} onChange={(image) => setNewProduct({ ...newProduct, image })} />
                   </div>
@@ -373,12 +429,7 @@ export default function Admin() {
                   </div>
                 </div>
 
-                <MultiTextFields
-                  title="Product Types"
-                  values={newProduct.types}
-                  placeholder="Dashcam, Tint, LED Lights"
-                  onChange={(types) => setNewProduct({ ...newProduct, types })}
-                />
+                <VarietyFields varieties={newProduct.varietyStocks} onChange={(varietyStocks) => setNewProduct({ ...newProduct, varietyStocks })} />
                 <FitmentFields fitments={newProduct.fitments} onChange={(fitments) => setNewProduct({ ...newProduct, fitments })} />
 
                 <div className="flex gap-3 mt-5">
@@ -441,8 +492,9 @@ export default function Admin() {
           <section>
             <h2 className="text-2xl font-bold mb-6">Closed Dates</h2>
             <div className="bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg p-6 mb-6">
-              <div className="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-4 items-end">
-                <DateInput label="Date" value={newClosedDate.date} onChange={(date) => setNewClosedDate({ ...newClosedDate, date })} />
+              <div className="grid grid-cols-1 md:grid-cols-[220px_220px_1fr_auto] gap-4 items-end">
+                <DateInput label="Start Date" value={newClosedDate.startDate} onChange={(startDate) => setNewClosedDate({ ...newClosedDate, startDate, endDate: newClosedDate.endDate || startDate })} />
+                <DateInput label="End Date" value={newClosedDate.endDate} onChange={(endDate) => setNewClosedDate({ ...newClosedDate, endDate })} />
                 <TextInput label="Reason" value={newClosedDate.reason} onChange={(reason) => setNewClosedDate({ ...newClosedDate, reason })} />
                 <button onClick={handleAddClosedDate} className="bg-red-600 text-white px-4 py-2 rounded-lg">Block Date</button>
               </div>
@@ -528,6 +580,9 @@ export default function Admin() {
                     <p className="text-sm text-gray-600 dark:text-gray-400">{account.role}</p>
                   </div>
                   <div className="flex gap-2">
+                    <button onClick={() => handleRequestPasswordChange(account.username)} className="border border-gray-300 dark:border-gray-800 px-3 py-2 rounded text-sm">
+                      Change Password
+                    </button>
                     <button onClick={() => handleSetRole(account.username, account.role === "executive" ? "employee" : "executive")} className="border border-gray-300 dark:border-gray-800 px-3 py-2 rounded text-sm">
                       {account.role === "executive" ? "Make Employee" : "Promote"}
                     </button>
@@ -537,6 +592,55 @@ export default function Admin() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            <h3 className="text-xl font-bold mt-8 mb-4">Password Change Requests</h3>
+            <div className="bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg overflow-hidden">
+              {passwordRequests.length === 0 ? (
+                <div className="p-8 text-center text-gray-600 dark:text-gray-400">No password change requests</div>
+              ) : (
+                passwordRequests.map((request) => {
+                  const completion = passwordCompletion[request.id] || { otp: request.otp || "", newPassword: "" };
+                  return (
+                    <div key={request.id} className="p-4 border-t first:border-t-0 border-gray-300 dark:border-gray-800">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{request.username}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {request.status} requested by {request.requestedBy}
+                            {request.approvedBy ? `, approved by ${request.approvedBy}` : ""}
+                          </p>
+                          {request.status === "approved" && request.otp && (
+                            <p className="text-sm text-red-600 mt-1">OTP: {request.otp}</p>
+                          )}
+                        </div>
+                        {request.status === "pending" && (
+                          <button onClick={() => handleApprovePasswordRequest(request.id)} className="bg-green-600 text-white px-3 py-2 rounded text-sm">
+                            Approve and Generate OTP
+                          </button>
+                        )}
+                      </div>
+                      {request.status === "approved" && (
+                        <div className="grid grid-cols-1 md:grid-cols-[160px_1fr_auto] gap-3 mt-4 items-end">
+                          <TextInput
+                            label="OTP"
+                            value={completion.otp}
+                            onChange={(otp) => setPasswordCompletion({ ...passwordCompletion, [request.id]: { ...completion, otp } })}
+                          />
+                          <PasswordInput
+                            label="New Password"
+                            value={completion.newPassword}
+                            onChange={(newPassword) => setPasswordCompletion({ ...passwordCompletion, [request.id]: { ...completion, newPassword } })}
+                          />
+                          <button onClick={() => handleCompletePasswordRequest(request.id)} className="bg-red-600 text-white px-3 py-2 rounded text-sm">
+                            Update Password
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </section>
         )}
@@ -555,7 +659,7 @@ function ProductTable({
   products: Product[];
   executive: boolean;
   onSetStock: (id: string, stock: number) => void;
-  onSubtract: (id: string) => void;
+  onSubtract: (id: string, varietyIndex?: number) => void;
   onDelete?: (id: string) => void;
 }) {
   return (
@@ -587,10 +691,23 @@ function ProductTable({
                 )}
               </td>
               <td className="p-4">
-                <div className="flex gap-3">
-                  <button onClick={() => onSubtract(product.id)} disabled={product.stock <= 0} className="bg-red-600 disabled:opacity-50 text-white px-3 py-2 rounded text-sm">
-                    Subtract 1
-                  </button>
+                <div className="flex flex-wrap gap-3">
+                  {product.varietyStocks?.length ? (
+                    product.varietyStocks.map((variety, index) => (
+                      <button
+                        key={`${variety.name}-${index}`}
+                        onClick={() => onSubtract(product.id, index)}
+                        disabled={Number(variety.stock || 0) <= 0}
+                        className="bg-red-600 disabled:opacity-50 text-white px-3 py-2 rounded text-sm"
+                      >
+                        {variety.name}: -1 ({variety.stock})
+                      </button>
+                    ))
+                  ) : (
+                    <button onClick={() => onSubtract(product.id)} disabled={product.stock <= 0} className="bg-red-600 disabled:opacity-50 text-white px-3 py-2 rounded text-sm">
+                      Subtract 1
+                    </button>
+                  )}
                   {executive && onDelete && (
                     <button onClick={() => onDelete(product.id)} className="text-red-600 inline-flex items-center gap-2 text-sm">
                       <Trash2 className="w-4 h-4" /> Remove
@@ -615,23 +732,31 @@ function getTypes(product: Product) {
   return product.types?.length ? product.types : product.type ? [product.type] : [];
 }
 
-function MultiTextFields({ title, values, placeholder, onChange }: { title: string; values: string[]; placeholder: string; onChange: (values: string[]) => void }) {
+function VarietyFields({ varieties, onChange }: { varieties: { name: string; stock: number }[]; onChange: (varieties: { name: string; stock: number }[]) => void }) {
   return (
     <div className="mt-5">
-      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">{title}</p>
-      <div className="space-y-2">
-        {values.map((value, index) => (
-          <input
-            key={index}
-            type="text"
-            value={value}
-            placeholder={placeholder}
-            onChange={(event) => onChange(values.map((item, itemIndex) => (itemIndex === index ? event.target.value : item)))}
-            className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2"
-          />
+      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Varieties and Stock</p>
+      <div className="space-y-3">
+        {varieties.map((variety, index) => (
+          <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_160px] gap-3">
+            <input
+              type="text"
+              value={variety.name}
+              placeholder="Variety name"
+              onChange={(event) => onChange(varieties.map((item, itemIndex) => (itemIndex === index ? { ...item, name: event.target.value } : item)))}
+              className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2"
+            />
+            <input
+              type="number"
+              value={variety.stock}
+              placeholder="Stock"
+              onChange={(event) => onChange(varieties.map((item, itemIndex) => (itemIndex === index ? { ...item, stock: Number(event.target.value) } : item)))}
+              className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2"
+            />
+          </div>
         ))}
       </div>
-      <button onClick={() => onChange([...values, ""])} className="mt-2 text-sm text-red-600">Add more</button>
+      <button onClick={() => onChange([...varieties, { ...emptyVariety }])} className="mt-2 text-sm text-red-600">Add more</button>
     </div>
   );
 }
@@ -712,17 +837,5 @@ function TextareaInput({ label, value, onChange }: { label: string; value: strin
       <span className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">{label}</span>
       <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={3} className="w-full bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2" />
     </label>
-  );
-}
-
-function List({ items, empty }: { items: string[]; empty: string }) {
-  return (
-    <div className="bg-white dark:bg-black border border-gray-300 dark:border-gray-800 rounded-lg overflow-hidden">
-      {items.length === 0 ? (
-        <div className="p-8 text-center text-gray-600 dark:text-gray-400">{empty}</div>
-      ) : (
-        items.map((item) => <div key={item} className="p-4 border-t first:border-t-0 border-gray-300 dark:border-gray-800">{item}</div>)
-      )}
-    </div>
   );
 }

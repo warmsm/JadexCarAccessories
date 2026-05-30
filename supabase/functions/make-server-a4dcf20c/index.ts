@@ -7,6 +7,7 @@ import { createClient } from "npm:@supabase/supabase-js";
 const app = new Hono();
 const ADMIN_ACCOUNT_PREFIX = "adminAccount:";
 const ADMIN_SESSION_PREFIX = "adminSession:";
+const PASSWORD_REQUEST_PREFIX = "passwordRequest:";
 
 const defaultAdminAccounts = [
   { username: "cashteoxon", password: "tatiisabel", role: "executive" },
@@ -234,6 +235,123 @@ app.delete("/make-server-a4dcf20c/admin/accounts/:username", async (c) => {
   }
 });
 
+app.get("/make-server-a4dcf20c/admin/password-requests", async (c) => {
+  try {
+    if (!(await requireExecutive(c))) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const requests = await kv.getByPrefix(PASSWORD_REQUEST_PREFIX);
+    return c.json({ requests: requests || [] });
+  } catch (error) {
+    console.log(`Error fetching password requests: ${error}`);
+    return c.json({ error: "Failed to fetch password requests" }, 500);
+  }
+});
+
+app.post("/make-server-a4dcf20c/admin/password-requests", async (c) => {
+  try {
+    const admin = await requireExecutive(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const { username } = await c.req.json();
+    const account = await kv.get(`${ADMIN_ACCOUNT_PREFIX}${username}`);
+    if (!account) {
+      return c.json({ error: "Account not found" }, 404);
+    }
+
+    const id = `${PASSWORD_REQUEST_PREFIX}${Date.now()}`;
+    await kv.set(id, {
+      id,
+      username,
+      status: "pending",
+      requestedBy: admin.username,
+      createdAt: new Date().toISOString(),
+    });
+    return c.json({ success: true, id });
+  } catch (error) {
+    console.log(`Error creating password request: ${error}`);
+    return c.json({ error: "Failed to create password request" }, 500);
+  }
+});
+
+app.put("/make-server-a4dcf20c/admin/password-requests/:id/approve", async (c) => {
+  try {
+    const admin = await requireExecutive(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const id = c.req.param("id");
+    const request = await kv.get(id);
+    if (!request) {
+      return c.json({ error: "Request not found" }, 404);
+    }
+
+    if (request.status === "approved") {
+      return c.json({ success: true, otp: request.otp });
+    }
+
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    await kv.set(id, {
+      ...request,
+      status: "approved",
+      otp,
+      approvedBy: admin.username,
+      approvedAt: new Date().toISOString(),
+    });
+    return c.json({ success: true, otp });
+  } catch (error) {
+    console.log(`Error approving password request ${c.req.param("id")}: ${error}`);
+    return c.json({ error: "Failed to approve password request" }, 500);
+  }
+});
+
+app.put("/make-server-a4dcf20c/admin/password-requests/:id/complete", async (c) => {
+  try {
+    const admin = await requireExecutive(c);
+    if (!admin) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const id = c.req.param("id");
+    const { otp, newPassword } = await c.req.json();
+    const request = await kv.get(id);
+    if (!request || request.status !== "approved" || request.otp !== String(otp)) {
+      return c.json({ error: "Invalid OTP" }, 400);
+    }
+
+    if (!newPassword || String(newPassword).length < 6) {
+      return c.json({ error: "Password must be at least 6 characters" }, 400);
+    }
+
+    const accountId = `${ADMIN_ACCOUNT_PREFIX}${request.username}`;
+    const account = await kv.get(accountId);
+    if (!account) {
+      return c.json({ error: "Account not found" }, 404);
+    }
+
+    await kv.set(accountId, {
+      ...account,
+      passwordHash: await hashPassword(String(newPassword)),
+      passwordUpdatedBy: admin.username,
+      passwordUpdatedAt: new Date().toISOString(),
+    });
+    await kv.set(id, {
+      ...request,
+      status: "completed",
+      completedBy: admin.username,
+      completedAt: new Date().toISOString(),
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    console.log(`Error completing password request ${c.req.param("id")}: ${error}`);
+    return c.json({ error: "Failed to complete password request" }, 500);
+  }
+});
+
 // Products routes
 app.get("/make-server-a4dcf20c/products", async (c) => {
   try {
@@ -289,9 +407,22 @@ app.put("/make-server-a4dcf20c/products/:id/decrement-stock", async (c) => {
     }
 
     const id = c.req.param("id");
+    const { varietyIndex } = await c.req.json().catch(() => ({}));
     const existing = await kv.get(id);
     if (!existing) {
       return c.json({ error: "Product not found" }, 404);
+    }
+
+    const varietyStocks = Array.isArray(existing.varietyStocks) ? existing.varietyStocks : [];
+    if (typeof varietyIndex === "number" && varietyStocks[varietyIndex]) {
+      const nextVarietyStocks = varietyStocks.map((variety, index) => (
+        index === varietyIndex
+          ? { ...variety, stock: Math.max(0, Number(variety.stock || 0) - 1) }
+          : variety
+      ));
+      const stock = nextVarietyStocks.reduce((total, variety) => total + Number(variety.stock || 0), 0);
+      await kv.set(id, { ...existing, varietyStocks: nextVarietyStocks, stock, updatedBy: admin.username, updatedAt: new Date().toISOString() });
+      return c.json({ success: true, stock });
     }
 
     const stock = Math.max(0, Number(existing.stock || 0) - 1);
@@ -400,19 +531,34 @@ app.post("/make-server-a4dcf20c/closed-dates", async (c) => {
       return c.json({ error: "Unauthorized" }, 401);
     }
 
-    const { date, reason } = await c.req.json();
-    if (!date) {
+    const { date, startDate, endDate, reason } = await c.req.json();
+    const rangeStart = startDate || date;
+    const rangeEnd = endDate || date || startDate;
+    if (!rangeStart || !rangeEnd) {
       return c.json({ error: "Missing date" }, 400);
     }
 
-    const id = `closedDate:${date}`;
-    await kv.set(id, {
-      id,
-      date,
-      reason: reason || "Closed",
-      createdAt: new Date().toISOString(),
-    });
-    return c.json({ success: true, id });
+    const start = new Date(`${rangeStart}T00:00:00`);
+    const end = new Date(`${rangeEnd}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return c.json({ error: "Invalid date range" }, 400);
+    }
+
+    const created = [];
+    for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      const dateStr = cursor.toISOString().slice(0, 10);
+      const id = `closedDate:${dateStr}`;
+      await kv.set(id, {
+        id,
+        date: dateStr,
+        reason: reason || "Closed",
+        rangeStart,
+        rangeEnd,
+        createdAt: new Date().toISOString(),
+      });
+      created.push(id);
+    }
+    return c.json({ success: true, ids: created });
   } catch (error) {
     console.log(`Error creating closed date: ${error}`);
     return c.json({ error: "Failed to create closed date" }, 500);

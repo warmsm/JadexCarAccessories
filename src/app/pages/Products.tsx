@@ -15,6 +15,7 @@ interface Product {
   price: number;
   stock: number;
   varieties: string;
+  varietyStocks?: { name: string; stock: number }[];
   image: string;
   description: string;
 }
@@ -292,7 +293,12 @@ export default function Products() {
                 <p className="text-2xl font-bold text-red-600 mb-5">PHP {selectedProduct.price}</p>
                 <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-5">
                   <p><span className="text-gray-500">For:</span> {getFitLabel(selectedProduct)}</p>
-                  {selectedProduct.varieties && (
+                  {selectedProduct.varietyStocks?.length ? (
+                    <p>
+                      <span className="text-gray-500">Varieties:</span>{" "}
+                      {selectedProduct.varietyStocks.map((variety) => `${variety.name} (${variety.stock})`).join(", ")}
+                    </p>
+                  ) : selectedProduct.varieties && (
                     <p><span className="text-gray-500">Varieties:</span> {selectedProduct.varieties}</p>
                   )}
                   <p><span className="text-gray-500">Stock:</span> {selectedProduct.stock} available</p>
